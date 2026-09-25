@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="A fast, honest internet speed test. Real download, upload and ping measurements, no sign-up, no ads blocking the result.">
+<title>testspeed — internet speed test</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="bar">
+  <div class="brand"><span class="brand-mark"></span>testspeed</div>
+  <div class="status" id="status"><span class="status-dot" id="statusDot"></span><span id="statusText">idle</span></div>
+</header>
+
+<main>
+
+  <section class="gauge-wrap">
+    <svg class="gauge" viewBox="0 0 300 210" aria-hidden="true">
+      <path class="gauge-track" d="M30,190 A120,120 0 0 1 270,190" />
+      <path class="gauge-fill" id="gaugeFill" d="M30,190 A120,120 0 0 1 270,190" />
+      <g id="ticks"></g>
+      <line class="needle" id="needle" x1="150" y1="190" x2="150" y2="80" />
+      <circle class="needle-hub" cx="150" cy="190" r="7" />
+    </svg>
+    <div class="gauge-readout">
+      <div class="gauge-number" id="gaugeNumber">0.0</div>
+      <div class="gauge-unit" id="gaugeUnit">Mbps</div>
+      <div class="gauge-phase" id="gaugePhase">ready to test</div>
+    </div>
+  </section>
+
+  <button class="start" id="startBtn">
+    <span id="startLabel">Start test</span>
+  </button>
+
+  <section class="readouts">
+    <div class="readout" data-metric="download">
+      <div class="readout-label"><span class="swatch teal"></span>Download</div>
+      <div class="readout-value"><span id="dlValue">—</span><small>Mbps</small></div>
+    </div>
+    <div class="readout" data-metric="upload">
+      <div class="readout-label"><span class="swatch amber"></span>Upload</div>
+      <div class="readout-value"><span id="ulValue">—</span><small>Mbps</small></div>
+    </div>
+    <div class="readout" data-metric="ping">
+      <div class="readout-label"><span class="swatch muted"></span>Ping</div>
+      <div class="readout-value"><span id="pingValue">—</span><small>ms</small></div>
+    </div>
+    <div class="readout" data-metric="jitter">
+      <div class="readout-label"><span class="swatch muted"></span>Jitter</div>
+      <div class="readout-value"><span id="jitterValue">—</span><small>ms</small></div>
+    </div>
+  </section>
+
+  <section class="meta">
+    <span id="metaColo">server —</span>
+    <span id="metaIp">ip —</span>
+    <span id="metaTime">—</span>
+  </section>
+
+</main>
+
+<footer>
+  <p>Measured against the Cloudflare edge network from your browser. Results vary with server load, Wi-Fi conditions and other traffic on your network.</p>
+</footer>
+
+<script src="script.js"></script>
+</body>
+</html>
