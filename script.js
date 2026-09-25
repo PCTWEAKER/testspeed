@@ -112,26 +112,34 @@
   // ---------- Download (fixed 15s duration) ----------
   const DOWNLOAD_MS = 15000;
   const UPLOAD_MS = 15000;
+  const WARMUP_MS = 3000; // exclude TCP/TLS ramp-up from the final average, like Ookla does
 
   async function runDownload(){
     setPhase('measuring download (15s)');
     setUnit('Mbps');
     setGauge(0, '#4FD1C5');
-    const streams = 4;
+    const streams = 8;
+    const staggerMs = 200;
     const controller = new AbortController();
     let totalBytes = 0;
     const start = performance.now();
     let lastTick = start, lastBytes = 0;
+    let warmupBytes = null, warmupTime = null;
 
     function onChunk(len){
       totalBytes += len;
       const now = performance.now();
+      const elapsed = now - start;
+      if (warmupBytes === null && elapsed >= WARMUP_MS){
+        warmupBytes = totalBytes;
+        warmupTime = now;
+      }
       const dt = now - lastTick;
       if (dt > 120){
         const instMbps = ((totalBytes - lastBytes) * 8) / (dt / 1000) / 1e6;
         setGauge(instMbps, '#4FD1C5');
         dlValue.textContent = fmt(instMbps);
-        const remaining = Math.max(0, DOWNLOAD_MS - (now - start));
+        const remaining = Math.max(0, DOWNLOAD_MS - elapsed);
         setPhase(`measuring download — ${Math.ceil(remaining/1000)}s left`);
         lastTick = now; lastBytes = totalBytes;
       }
@@ -154,12 +162,24 @@
       }
     }
 
+    function delayedPull(i){
+      return new Promise(resolve => {
+        setTimeout(() => { pull().then(resolve); }, i * staggerMs);
+      });
+    }
+
     const timer = new Promise(resolve => setTimeout(() => { controller.abort(); resolve(); }, DOWNLOAD_MS));
-    await Promise.race([Promise.all(Array.from({length: streams}, pull)), timer]);
+    await Promise.race([Promise.all(Array.from({length: streams}, (_, i) => delayedPull(i))), timer]);
     controller.abort();
 
-    const totalSec = (performance.now() - start) / 1000;
-    const finalMbps = (totalBytes * 8) / totalSec / 1e6;
+    const end = performance.now();
+    let finalMbps;
+    if (warmupBytes !== null && end > warmupTime){
+      // steady-state only: excludes the ramp-up window
+      finalMbps = ((totalBytes - warmupBytes) * 8) / ((end - warmupTime) / 1000) / 1e6;
+    }else{
+      finalMbps = (totalBytes * 8) / ((end - start) / 1000) / 1e6;
+    }
     setGauge(finalMbps, '#4FD1C5');
     dlValue.textContent = fmt(finalMbps);
     return finalMbps;
@@ -186,17 +206,24 @@
     setPhase('measuring upload (15s)');
     setUnit('Mbps');
     setGauge(0, '#FFB020');
-    const streams = 3;
+    const streams = 5;
+    const staggerMs = 200;
     const size = 200_000_000; // large payload; upload is time-boxed, not size-boxed
     const blob = new Blob([new Uint8Array(size)]);
     const loadedByStream = new Array(streams).fill(0);
     const start = performance.now();
     const deadline = start + UPLOAD_MS;
     let lastTick = start, lastTotal = 0;
+    let warmupBytes = null, warmupTime = null;
 
     function tick(){
       const total = loadedByStream.reduce((a,b) => a+b, 0);
       const now = performance.now();
+      const elapsed = now - start;
+      if (warmupBytes === null && elapsed >= WARMUP_MS){
+        warmupBytes = total;
+        warmupTime = now;
+      }
       const dt = now - lastTick;
       if (dt > 120){
         const instMbps = ((total - lastTotal) * 8) / (dt / 1000) / 1e6;
@@ -208,13 +235,24 @@
       }
     }
 
-    const jobs = Array.from({length: streams}, (_, i) =>
-      xhrUploadTimed(blob, deadline, (loaded) => { loadedByStream[i] = loaded; tick(); })
-    );
-    await Promise.all(jobs);
-    const totalSec = (performance.now() - start) / 1000;
+    function delayedUpload(i){
+      return new Promise(resolve => {
+        setTimeout(() => {
+          xhrUploadTimed(blob, deadline, (loaded) => { loadedByStream[i] = loaded; tick(); }).then(resolve);
+        }, i * staggerMs);
+      });
+    }
+
+    await Promise.all(Array.from({length: streams}, (_, i) => delayedUpload(i)));
+
+    const end = performance.now();
     const totalBytes = loadedByStream.reduce((a,b) => a+b, 0);
-    const finalMbps = (totalBytes * 8) / totalSec / 1e6;
+    let finalMbps;
+    if (warmupBytes !== null && end > warmupTime){
+      finalMbps = ((totalBytes - warmupBytes) * 8) / ((end - warmupTime) / 1000) / 1e6;
+    }else{
+      finalMbps = (totalBytes * 8) / ((end - start) / 1000) / 1e6;
+    }
     setGauge(finalMbps, '#FFB020');
     ulValue.textContent = fmt(finalMbps);
     return finalMbps;
