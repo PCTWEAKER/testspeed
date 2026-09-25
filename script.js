@@ -109,13 +109,16 @@
     return { ping: median, jitter };
   }
 
-  // ---------- Download ----------
+  // ---------- Download (fixed 15s duration) ----------
+  const DOWNLOAD_MS = 15000;
+  const UPLOAD_MS = 15000;
+
   async function runDownload(){
-    setPhase('measuring download');
+    setPhase('measuring download (15s)');
     setUnit('Mbps');
     setGauge(0, '#4FD1C5');
-    const streams = 3;
-    const bytesPerStream = 22_000_000;
+    const streams = 4;
+    const controller = new AbortController();
     let totalBytes = 0;
     const start = performance.now();
     let lastTick = start, lastBytes = 0;
@@ -128,21 +131,33 @@
         const instMbps = ((totalBytes - lastBytes) * 8) / (dt / 1000) / 1e6;
         setGauge(instMbps, '#4FD1C5');
         dlValue.textContent = fmt(instMbps);
+        const remaining = Math.max(0, DOWNLOAD_MS - (now - start));
+        setPhase(`measuring download — ${Math.ceil(remaining/1000)}s left`);
         lastTick = now; lastBytes = totalBytes;
       }
     }
 
     async function pull(){
-      const res = await fetch(`${DOWN_URL}?bytes=${bytesPerStream}&_=${Date.now()}${Math.random()}`, {cache:'no-store'});
-      const reader = res.body.getReader();
-      while (true){
-        const { done, value } = await reader.read();
-        if (done) break;
-        onChunk(value.length);
+      while (!controller.signal.aborted){
+        let res;
+        try{
+          res = await fetch(`${DOWN_URL}?bytes=200000000&_=${Date.now()}${Math.random()}`, {cache:'no-store', signal: controller.signal});
+        }catch(e){ return; }
+        const reader = res.body.getReader();
+        try{
+          while (true){
+            const { done, value } = await reader.read();
+            if (done) break;
+            onChunk(value.length);
+          }
+        }catch(e){ return; } // aborted mid-stream
       }
     }
 
-    await Promise.all(Array.from({length: streams}, pull));
+    const timer = new Promise(resolve => setTimeout(() => { controller.abort(); resolve(); }, DOWNLOAD_MS));
+    await Promise.race([Promise.all(Array.from({length: streams}, pull)), timer]);
+    controller.abort();
+
     const totalSec = (performance.now() - start) / 1000;
     const finalMbps = (totalBytes * 8) / totalSec / 1e6;
     setGauge(finalMbps, '#4FD1C5');
@@ -150,27 +165,33 @@
     return finalMbps;
   }
 
-  // ---------- Upload ----------
-  function xhrUpload(blob, onProgress){
-    return new Promise((resolve, reject) => {
+  // ---------- Upload (fixed 15s duration) ----------
+  function xhrUploadTimed(blob, deadline, onProgress){
+    return new Promise((resolve) => {
       const xhr = new XMLHttpRequest();
+      let settled = false;
+      const finish = () => { if (!settled){ settled = true; resolve(); } };
       xhr.open('POST', `${UP_URL}?_=${Date.now()}${Math.random()}`);
       xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded); };
-      xhr.onload = () => resolve();
-      xhr.onerror = () => reject(new Error('upload failed'));
+      xhr.onload = finish;
+      xhr.onerror = finish;
+      xhr.onabort = finish;
       xhr.send(blob);
+      const remaining = Math.max(0, deadline - performance.now());
+      setTimeout(() => { try{ xhr.abort(); }catch(e){} }, remaining);
     });
   }
 
   async function runUpload(){
-    setPhase('measuring upload');
+    setPhase('measuring upload (15s)');
     setUnit('Mbps');
     setGauge(0, '#FFB020');
-    const streams = 2;
-    const size = 9_000_000;
+    const streams = 3;
+    const size = 200_000_000; // large payload; upload is time-boxed, not size-boxed
     const blob = new Blob([new Uint8Array(size)]);
     const loadedByStream = new Array(streams).fill(0);
     const start = performance.now();
+    const deadline = start + UPLOAD_MS;
     let lastTick = start, lastTotal = 0;
 
     function tick(){
@@ -181,16 +202,18 @@
         const instMbps = ((total - lastTotal) * 8) / (dt / 1000) / 1e6;
         setGauge(instMbps, '#FFB020');
         ulValue.textContent = fmt(instMbps);
+        const remaining = Math.max(0, deadline - now);
+        setPhase(`measuring upload — ${Math.ceil(remaining/1000)}s left`);
         lastTick = now; lastTotal = total;
       }
     }
 
     const jobs = Array.from({length: streams}, (_, i) =>
-      xhrUpload(blob, (loaded) => { loadedByStream[i] = loaded; tick(); })
+      xhrUploadTimed(blob, deadline, (loaded) => { loadedByStream[i] = loaded; tick(); })
     );
     await Promise.all(jobs);
     const totalSec = (performance.now() - start) / 1000;
-    const totalBytes = streams * size;
+    const totalBytes = loadedByStream.reduce((a,b) => a+b, 0);
     const finalMbps = (totalBytes * 8) / totalSec / 1e6;
     setGauge(finalMbps, '#FFB020');
     ulValue.textContent = fmt(finalMbps);
